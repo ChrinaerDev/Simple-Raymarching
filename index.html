@@ -1,0 +1,335 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body style="margin: 0;padding: 0;">
+    <div id="canbox"></div>
+</body>
+<script id="vertexShader" type="x-shader/x-vertex">
+    varying vec3 vWorldPos;
+    varying vec2 vUv;
+    
+    void main() {
+        
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+    }
+</script>
+
+<script id="fragmentShader" type="x-shader/x-fragment">
+ uniform float time;
+ uniform float progress;
+ uniform vec2 mouse;
+ uniform sampler2D matcap,matcap1;
+ uniform vec4 resolution;
+ varying vec2 vUv;
+ float PI = 3.141592653589793238;
+  
+ mat4 rotationMatrix(vec3 axis, float angle){
+    axis = normalize(axis);
+    float s = sin(angle);
+    float c = cos(angle);
+    float oc = 1.0 - c;
+
+    return mat4(
+        oc * axis.x * axis.x  + c,
+        oc * axis.x * axis.y  - axis.z * s,
+        oc * axis.z * axis.x  + axis.y * s,0.0,
+        oc * axis.x * axis.y  + axis.z * s,
+        oc * axis.y * axis.y  + c,
+        oc * axis.y * axis.z - axis.x * s,0.0,
+        oc * axis.z * axis.x - axis.y * s,
+        oc * axis.y * axis.z + axis.x * s,
+        oc * axis.z * axis.z + c,0.0,
+        0.0, 0.0,0.0,1.0
+    
+    );
+ }
+
+ vec2 getmatcap(vec3 eye, vec3 normal){
+    vec3 reflected = reflect(eye, normal);
+    float m = 2.8284271247461903 * sqrt(reflected.z + 1.0);
+    return reflected.xy / m + 0.5;
+ }
+
+
+ vec3 rotate(vec3 v, vec3 axis, float angle){
+    mat4 m = rotationMatrix(axis, angle);
+    return(m * vec4(v, 1.0)).xyz;
+ }
+
+ float smin(float a, float b, float k)
+ {
+   float h = clamp(0.5+0.5*(b-a)/k,0.0,1.0);
+   return mix(b, a, h ) - k*h*(1.0-h);
+ }
+
+
+
+
+
+
+
+
+ float sdSphere(vec3 p, float r){
+    return length(p)-r;
+ }
+
+ float sdBox( vec3 p, vec3 b)
+ {
+   vec3 q = abs(p) - b;
+   return  length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);
+ }
+
+
+ float rand(vec2 co)
+ {
+   return fract(sin(dot(co.xy,vec2(12.9898,78.233))) * 43758.5453);
+ }
+
+
+
+
+ float sdf(vec3 p){
+    vec3 p1 = rotate(p,vec3(1.),time/5.);
+    float box = smin(sdBox(p1,vec3(0.2)),sdSphere(p,0.2),0.3);
+    float realsphere = sdSphere(p1,0.3);
+    float final = mix(box,realsphere,0.);
+
+    
+    for(float i = 0.; i < 1.; i++){
+        float randOffset = rand(vec2(i,0.));
+        float progr = fract(time/3. + randOffset);
+        vec3 pos = vec3(sin(randOffset*2.*PI),cos(randOffset*2.*PI),0.);
+        float gotoCenter = sdSphere(p - pos*progr,0.1);
+        final = smin(final,gotoCenter,0.3);
+
+    } 
+   
+  
+
+
+    float mousesphere = sdSphere(p - vec3(mouse*resolution.zw*2.,0.),0.2);
+    return smin(final,mousesphere,0.4);
+
+  //  return sphere;
+ }
+
+ vec3 calcNormal( in vec3 p)
+ {
+    const float eps = 0.0001;
+    const vec2 h = vec2(eps,0);
+    return normalize( vec3(
+        sdf(p+h.xyy) - sdf(p-h.xyy),
+        sdf(p+h.yxy) - sdf(p-h.yxy),
+        sdf(p+h.yyx) - sdf(p-h.yyx)
+        ) );
+ }
+
+ void main(){
+    float dist = length(vUv - vec2(0.5));
+    vec3 bg = mix(vec3(0.3),vec3(0.0),dist);
+    vec2 newUV = (vUv - vec2(0.5))*resolution.zw + vec2(0.5);
+    vec3 camPos =  vec3(0.,0.,2.);
+    vec3 ray = normalize(vec3( (vUv - vec2(0.5))*resolution.zw,-1));
+
+    vec3 rayPos = camPos;
+     float t = 0.;
+     float tMax = 5.;
+    for(int i=0;i<256;++i){
+      vec3 pos  = camPos + t*ray;
+      float h = sdf(pos);
+      if(h<0.0001 || t>tMax) break;
+        t+=h;
+    }  
+
+    vec3 color = bg;
+    if(t<tMax){
+        vec3 pos  = camPos + t*ray;
+        color = vec3(1.);
+        vec3 normal = calcNormal(pos);
+        color = normal;
+        float diff = dot(vec3(1.),normal);
+        vec2 matcapUV = getmatcap(ray,normal);
+        color = vec3(diff);
+        color = texture2D(matcap1,matcapUV).rgb;
+
+        float fresnel = pow(1. + dot(ray,normal), 3.);
+        //color = vec3(fresnel);
+
+        color = mix(color,bg,fresnel);
+    } 
+
+
+
+    gl_FragColor = vec4(color,1.);
+
+    
+   
+   
+ }
+ 
+
+</script>
+
+
+<script src="three/build/three.js"></script>
+<script src="three/examples/js/controls/OrbitControls.js"></script>
+<script src="three/src/loaders/TextureLoader.js"></script>
+
+
+
+<script type="module">
+
+//import matcap from './wbg.png'
+//   import fragment from './fragment.glsl.txt'
+
+// initGraphics()
+// initMeshes()
+
+
+    
+var RendererSize,container,scene,camera,renderer,controls
+// function initGraphics() {
+    RendererSize = [ window.innerWidth, window.innerHeight]
+
+
+container = document.querySelector('#canbox');
+scene = new THREE.Scene();
+scene.name = 'scene'
+
+renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+
+renderer.setSize(  RendererSize[0],  RendererSize[1] );
+renderer.physicallyCorrectLights = true
+renderer.outputEncoding = THREE.sRGBEncoding;
+container.appendChild( renderer.domElement );
+
+// camera = new THREE.PerspectiveCamera( 30, RendererSize[0]/ RendererSize[1], 0.1, 1000
+// );
+var aspect = window.innerWidth/window.innerHeight
+var frustumSize =  1
+camera = new THREE.OrthographicCamera( frustumSize/-2, frustumSize/2, frustumSize/2, frustumSize/-2, -1000
+,1000);
+
+
+//controls = new THREE.OrbitControls( camera, renderer.domElement);
+
+
+camera.position.set(0,0,2)
+camera.lookAt(new THREE. Vector3(0,0,0))
+
+scene.background = new THREE.Color('black');
+
+renderer.shadowMap.enabled= true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+var gridXZ = new THREE.GridHelper(10, 10,'yellow','white');
+gridXZ.rotation.x = 0;
+//scene.add(gridXZ);
+// }
+
+// function initMeshes(){
+    var mat,geom,mesh
+  
+    mat = new THREE.ShaderMaterial({
+        extensions:{
+            derivatives:'#extenstion GL_OES_standard_derivatives: enable'
+        },
+        side: THREE.DoubleSide,
+        uniforms:{
+            time: {value: 0},
+            mouse: {value: new THREE.Vector2(0,0)},
+            matcap: {value: new THREE.TextureLoader().load('./wbg.png')},
+            matcap1: {value: new THREE.TextureLoader().load('./wbg1.png')},
+            resolution: {value: new THREE.Vector4()},
+        },
+        vertexShader: document.getElementById( 'vertexShader' ).textContent,
+		fragmentShader: document.getElementById( 'fragmentShader' ).textContent
+    })
+    // mat = new THREE.MeshBasicMaterial({color: 'crimson',})
+    geom = new THREE.PlaneGeometry(1,1,1,1)
+    mesh = new THREE.Mesh(geom,mat) 
+    mesh.rotation.set(0,0,0)
+    scene.add(mesh)
+    console.log(scene)
+// }
+
+window.addEventListener('resize',resize)
+
+var w = container.offsetWidth
+var h = container.offsetHeight
+function resize(){
+   
+    renderer.setSize(w,h)
+    aspect = w/h
+    var img_aspect = 1
+    let a1,a2
+    if((h/w)>img_aspect){
+        a1 = aspect * img_aspect
+        a2 = 1
+    }else{
+        a1 = 1
+        a2 = (h/w) / img_aspect
+    }
+
+    mat.uniforms.resolution.value.x = w
+    mat.uniforms.resolution.value.y = h
+    mat.uniforms.resolution.value.z = a1
+    mat.uniforms.resolution.value.w = a2
+
+   camera.updateProjectionMatrix()
+//    camera.aspect = w/h
+
+}
+var mouse
+function mouseEvents(){
+    mouse = new THREE.Vector2()
+  document.addEventListener('mousemove',(e)=>{
+     mouse.x = e.pageX/w-0.5
+     mouse.y = -e.pageY/h+0.5
+  })
+}
+
+
+mouseEvents()
+
+
+
+
+
+
+
+
+
+
+
+animate()
+
+function animate() {
+
+requestAnimationFrame( animate );
+
+render();
+resize()
+
+mat.uniforms.time.value += 0.1
+
+if(mouse){
+    mat.uniforms.mouse.value = mouse
+}
+
+
+}
+function render() {
+	renderer.render( scene, camera );
+}
+
+
+
+</script>
+</html>
